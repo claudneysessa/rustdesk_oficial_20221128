@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
@@ -41,6 +42,9 @@ class FileModel extends ChangeNotifier {
 
   /// JobTable <jobId, JobProgress>
   final _jobTable = List<JobProgress>.empty(growable: true).obs;
+
+  /// `isLocal` bool
+  Function(bool)? onDirChanged;
 
   RxList<JobProgress> get jobTable => _jobTable;
 
@@ -141,18 +145,14 @@ class FileModel extends ChangeNotifier {
     }
   }
 
-  bool get currentShowHidden =>
-      _isSelectedLocal ? _localOption.showHidden : _remoteOption.showHidden;
-
-  bool getCurrentShowHidden(bool isLocal) {
-    return isLocal ? _localOption.showHidden : _remoteOption.showHidden;
+  bool getCurrentShowHidden([bool? isLocal]) {
+    final isLocal_ = isLocal ?? _isSelectedLocal;
+    return isLocal_ ? _localOption.showHidden : _remoteOption.showHidden;
   }
 
-  bool get currentIsWindows =>
-      _isSelectedLocal ? _localOption.isWindows : _remoteOption.isWindows;
-
-  bool getCurrentIsWindows(bool isLocal) {
-    return isLocal ? _localOption.isWindows : _remoteOption.isWindows;
+  bool getCurrentIsWindows([bool? isLocal]) {
+    final isLocal_ = isLocal ?? _isSelectedLocal;
+    return isLocal_ ? _localOption.isWindows : _remoteOption.isWindows;
   }
 
   final _fileFetcher = FileFetcher();
@@ -268,6 +268,7 @@ class FileModel extends ChangeNotifier {
   }
 
   jobError(Map<String, dynamic> evt) {
+    final err = evt['err'].toString();
     if (!isDesktop) {
       if (_jobResultListener.isListening) {
         _jobResultListener.complete(evt);
@@ -275,12 +276,24 @@ class FileModel extends ChangeNotifier {
       }
       _selectMode = false;
       _jobProgress.clear();
+      _jobProgress.err = err;
       _jobProgress.state = JobState.error;
+      _jobProgress.fileNum = int.parse(evt['file_num']);
+      if (err == "skipped") {
+        _jobProgress.state = JobState.done;
+        _jobProgress.finishedSize = _jobProgress.totalSize;
+      }
     } else {
       int jobIndex = getJob(int.parse(evt['id']));
       if (jobIndex != -1) {
         final job = jobTable[jobIndex];
         job.state = JobState.error;
+        job.err = err;
+        job.fileNum = int.parse(evt['file_num']);
+        if (err == "skipped") {
+          job.state = JobState.done;
+          job.finishedSize = job.totalSize;
+        }
       }
     }
     debugPrint("jobError $evt");
@@ -327,13 +340,13 @@ class FileModel extends ChangeNotifier {
     _localOption.showHidden = (await bind.sessionGetPeerOption(
             id: parent.target?.id ?? "", name: "local_show_hidden"))
         .isNotEmpty;
+    _localOption.isWindows = Platform.isWindows;
 
     _remoteOption.showHidden = (await bind.sessionGetPeerOption(
             id: parent.target?.id ?? "", name: "remote_show_hidden"))
         .isNotEmpty;
-    _remoteOption.isWindows = parent.target?.ffiModel.pi.platform == "Windows";
-
-    debugPrint("remote platform: ${parent.target?.ffiModel.pi.platform}");
+    _remoteOption.isWindows =
+        parent.target?.ffiModel.pi.platform.toLowerCase() == "windows";
 
     await Future.delayed(Duration(milliseconds: 100));
 
@@ -354,9 +367,11 @@ class FileModel extends ChangeNotifier {
     await bind.sessionLoadLastTransferJobs(id: '${parent.target?.id}');
   }
 
-  onClose() {
+  Future<void> onClose() async {
     parent.target?.dialogManager.dismissAll();
     jobReset();
+
+    onDirChanged = null;
 
     // save config
     Map<String, String> msgMap = {};
@@ -367,7 +382,7 @@ class FileModel extends ChangeNotifier {
     msgMap["remote_show_hidden"] = _remoteOption.showHidden ? "Y" : "";
     final id = parent.target?.id ?? "";
     for (final msg in msgMap.entries) {
-      bind.sessionPeerOption(id: id, name: msg.key, value: msg.value);
+      await bind.sessionPeerOption(id: id, name: msg.key, value: msg.value);
     }
     _currentLocalDir.clear();
     _currentRemoteDir.clear();
@@ -399,14 +414,10 @@ class FileModel extends ChangeNotifier {
     if (!isBack) {
       pushHistory(isLocal);
     }
-    final showHidden =
-        isLocal ? _localOption.showHidden : _remoteOption.showHidden;
-    final isWindows =
-        isLocal ? _localOption.isWindows : _remoteOption.isWindows;
+    final showHidden = getCurrentShowHidden(isLocal);
+    final isWindows = getCurrentIsWindows(isLocal);
     // process /C:\ -> C:\ on Windows
-    if (isLocal
-        ? _localOption.isWindows
-        : _remoteOption.isWindows && path.length > 1 && path[0] == '/') {
+    if (isWindows && path.length > 1 && path[0] == '/') {
       path = path.substring(1);
       if (path[path.length - 1] != '\\') {
         path = "$path\\";
@@ -421,6 +432,7 @@ class FileModel extends ChangeNotifier {
         _currentRemoteDir = fd;
       }
       notifyListeners();
+      onDirChanged?.call(isLocal);
     } catch (e) {
       debugPrint("Failed to openDirectory $path: $e");
     }
@@ -1090,6 +1102,7 @@ class JobProgress {
   var remote = "";
   var to = "";
   var showHidden = false;
+  var err = "";
 
   clear() {
     state = JobState.none;
@@ -1101,6 +1114,14 @@ class JobProgress {
     fileCount = 0;
     remote = "";
     to = "";
+    err = "";
+  }
+
+  String display() {
+    if (state == JobState.done && err == "skipped") {
+      return translate("Skipped");
+    }
+    return state.display();
   }
 }
 

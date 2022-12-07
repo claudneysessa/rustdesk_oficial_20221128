@@ -42,7 +42,7 @@ class _ConnectionPageState extends State<ConnectionPage>
   final RxBool _idInputFocused = false.obs;
   final FocusNode _idFocusNode = FocusNode();
 
-  var svcStopped = false.obs;
+  var svcStopped = Get.find<RxBool>(tag: 'stop-service');
   var svcStatusCode = 0.obs;
   var svcIsUsingPublicServer = true.obs;
 
@@ -61,13 +61,12 @@ class _ConnectionPageState extends State<ConnectionPage>
         }
       }();
     }
-    _updateTimer = Timer.periodic(Duration(seconds: 1), (timer) {
+    _updateTimer = periodic_immediate(Duration(seconds: 1), () async {
       updateStatus();
     });
     _idFocusNode.addListener(() {
       _idInputFocused.value = _idFocusNode.hasFocus;
     });
-    Get.put<RxBool>(svcStopped, tag: 'service-stop');
     windowManager.addListener(this);
   }
 
@@ -75,7 +74,6 @@ class _ConnectionPageState extends State<ConnectionPage>
   void dispose() {
     _idController.dispose();
     _updateTimer?.cancel();
-    Get.delete<RxBool>(tag: 'service-stop');
     windowManager.removeListener(this);
     super.dispose();
   }
@@ -115,7 +113,7 @@ class _ConnectionPageState extends State<ConnectionPage>
                     delegate: SliverChildListDelegate([
                   Row(
                     children: [
-                      _buildRemoteIDTextField(context),
+                      Flexible(child: _buildRemoteIDTextField(context)),
                     ],
                   ).marginOnly(top: 22),
                   SizedBox(height: 12),
@@ -123,28 +121,7 @@ class _ConnectionPageState extends State<ConnectionPage>
                 ])),
                 SliverFillRemaining(
                   hasScrollBody: false,
-                  child: PeerTabPage(
-                    tabs: [
-                      translate('Recent Sessions'),
-                      translate('Favorites'),
-                      translate('Discovered'),
-                      translate('Address Book')
-                    ],
-                    children: [
-                      RecentPeersView(
-                        menuPadding: kDesktopMenuPadding,
-                      ),
-                      FavoritePeersView(
-                        menuPadding: kDesktopMenuPadding,
-                      ),
-                      DiscoveredPeersView(
-                        menuPadding: kDesktopMenuPadding,
-                      ),
-                      const AddressBook(
-                        menuPadding: kDesktopMenuPadding,
-                      ),
-                    ],
-                  ).paddingOnly(right: 12.0),
+                  child: PeerTabPage().paddingOnly(right: 12.0),
                 )
               ],
             ).paddingOnly(left: 12.0),
@@ -260,9 +237,8 @@ class _ConnectionPageState extends State<ConnectionPage>
         ),
       ),
     );
-    return Center(
-        child: Container(
-            constraints: const BoxConstraints(maxWidth: 600), child: w));
+    return Container(
+        constraints: const BoxConstraints(maxWidth: 600), child: w);
   }
 
   Widget buildStatus() {
@@ -296,7 +272,7 @@ class _ConnectionPageState extends State<ConnectionPage>
               // stop
               Offstage(
                 offstage: !svcStopped.value,
-                child: GestureDetector(
+                child: InkWell(
                         onTap: () async {
                           bool checked = !bind.mainIsInstalled() ||
                               await bind.mainCheckSuperUserPermission();
@@ -357,7 +333,6 @@ class _ConnectionPageState extends State<ConnectionPage>
   }
 
   updateStatus() async {
-    svcStopped.value = await bind.mainGetOption(key: "stop-service") == "Y";
     final status =
         jsonDecode(await bind.mainGetConnectStatus()) as Map<String, dynamic>;
     svcStatusCode.value = status["status_num"];

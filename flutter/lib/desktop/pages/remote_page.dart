@@ -235,12 +235,14 @@ class _RemotePageState extends State<RemotePage>
       }))
     ];
 
-    paints.add(Obx(() => Visibility(
-        visible: _showRemoteCursor.isTrue && _remoteCursorMoved.isTrue,
-        child: CursorPaint(
-          id: widget.id,
-          zoomCursor: _zoomCursor,
-        ))));
+    if (!_ffi.canvasModel.cursorEmbeded) {
+      paints.add(Obx(() => Visibility(
+          visible: _showRemoteCursor.isTrue && _remoteCursorMoved.isTrue,
+          child: CursorPaint(
+            id: widget.id,
+            zoomCursor: _zoomCursor,
+          ))));
+    }
     paints.add(QualityMonitor(_ffi.qualityMonitorModel));
     paints.add(RemoteMenubar(
       id: widget.id,
@@ -300,20 +302,22 @@ class _ImagePaintState extends State<ImagePaint> {
 
     mouseRegion({child}) => Obx(() => MouseRegion(
         cursor: cursorOverImage.isTrue
-            ? keyboardEnabled.isTrue
-                ? (() {
-                    if (remoteCursorMoved.isTrue) {
-                      _lastRemoteCursorMoved = true;
-                      return SystemMouseCursors.none;
-                    } else {
-                      if (_lastRemoteCursorMoved) {
-                        _lastRemoteCursorMoved = false;
-                        _firstEnterImage.value = true;
-                      }
-                      return _buildCustomCursor(context, s);
-                    }
-                  }())
-                : _buildDisabledCursor(context, s)
+            ? c.cursorEmbeded
+                ? SystemMouseCursors.none
+                : keyboardEnabled.isTrue
+                    ? (() {
+                        if (remoteCursorMoved.isTrue) {
+                          _lastRemoteCursorMoved = true;
+                          return SystemMouseCursors.none;
+                        } else {
+                          if (_lastRemoteCursorMoved) {
+                            _lastRemoteCursorMoved = false;
+                            _firstEnterImage.value = true;
+                          }
+                          return _buildCustomCursor(context, s);
+                        }
+                      }())
+                    : _buildDisabledCursor(context, s)
             : MouseCursor.defer,
         onHover: (evt) {},
         child: child));
@@ -409,8 +413,12 @@ class _ImagePaintState extends State<ImagePaint> {
       );
     } else {
       widget = Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [widget],
+        children: [
+          Container(
+            width: ((layoutSize.width - size.width) ~/ 2).toDouble(),
+          ),
+          widget,
+        ],
       );
     }
     if (layoutSize.height < size.height) {
@@ -426,8 +434,12 @@ class _ImagePaintState extends State<ImagePaint> {
       );
     } else {
       widget = Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [widget],
+        children: [
+          Container(
+            height: ((layoutSize.height - size.height) ~/ 2).toDouble(),
+          ),
+          widget,
+        ],
       );
     }
     if (layoutSize.width < size.width) {
@@ -572,7 +584,8 @@ class ImagePainter extends CustomPainter {
         paint.filterQuality = FilterQuality.high;
       }
     }
-    canvas.drawImage(image!, Offset(x, y), paint);
+    canvas.drawImage(
+        image!, Offset(x.toInt().toDouble(), y.toInt().toDouble()), paint);
   }
 
   @override

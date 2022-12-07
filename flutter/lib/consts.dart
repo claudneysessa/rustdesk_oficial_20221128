@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
 
+import 'package:flutter_hbb/common.dart';
+
 const double kDesktopRemoteTabBarHeight = 28.0;
 
 /// [kAppTypeMain] used by 'Desktop Main Page' , 'Mobile (Client and Server)' , 'Desktop CM Page', "Install Page"
@@ -9,9 +11,12 @@ const String kAppTypeDesktopRemote = "remote";
 const String kAppTypeDesktopFileTransfer = "file transfer";
 const String kAppTypeDesktopPortForward = "port forward";
 
+const String kWindowMainWindowOnTop = "main_window_on_top";
+const String kWindowGetWindowInfo = "get_window_info";
 const String kWindowActionRebuild = "rebuild";
 const String kWindowEventHide = "hide";
 const String kWindowEventShow = "show";
+const String kWindowConnect = "connect";
 
 const String kUniLinksPrefix = "rustdesk://";
 const String kActionNewConnection = "connection/new/";
@@ -324,3 +329,20 @@ const Map<int, String> physicalKeyMap = <int, String>{
   0x000c019e: 'LOCK_SCREEN',
   0x000c0208: 'VK_PRINT',
 };
+
+/// The windows targets in the publish time order.
+enum WindowsTarget {
+  naw, // not a windows target
+  xp,
+  vista,
+  w7,
+  w8,
+  w8_1,
+  w10,
+  w11
+}
+
+/// A convenient method to transform a build number to the corresponding windows version.
+extension WindowsTargetExt on int {
+  WindowsTarget get windowsVersion => getWindowsTarget(this);
+}

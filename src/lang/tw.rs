@@ -397,5 +397,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("Request access to your device", "請求訪問你的設備"),
         ("Hide connection management window", "隱藏連接管理窗口"),
         ("hide_cm_tip", "在只允許密碼連接並且只用固定密碼的情況下才允許隱藏"),
+        ("wayland_experiment_tip", ""),
+        ("Right click to select tabs", "右鍵選擇選項卡"),
+        ("Add to Address Book", "添加到地址簿"),
     ].iter().cloned().collect();
 }

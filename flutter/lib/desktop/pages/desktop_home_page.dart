@@ -14,11 +14,8 @@ import 'package:flutter_hbb/desktop/widgets/scroll_wrapper.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
-import 'package:flutter_hbb/utils/tray_manager.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
-import 'package:tray_manager/tray_manager.dart';
-import 'package:window_manager/window_manager.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:window_size/window_size.dart' as window_size;
 
@@ -34,13 +31,18 @@ class DesktopHomePage extends StatefulWidget {
 const borderColor = Color(0xFF2F65BA);
 
 class _DesktopHomePageState extends State<DesktopHomePage>
-    with TrayListener, AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin {
   final _leftPaneScrollController = ScrollController();
 
   @override
   bool get wantKeepAlive => true;
   var updateUrl = '';
+  var systemError = '';
   StreamSubscription? _uniLinksSubscription;
+  var svcStopped = false.obs;
+  var watchIsCanScreenRecording = false;
+  var watchIsProcessTrust = false;
+  Timer? _updateTimer;
 
   @override
   Widget build(BuildContext context) {
@@ -299,15 +301,6 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   }
 
   Widget buildHelpCards() {
-    if (Platform.isWindows) {
-      if (!bind.mainIsInstalled()) {
-        return buildInstallCard(
-            "", "install_tip", "Install", bind.mainGotoInstall);
-      } else if (bind.mainIsInstalledLowerVersion()) {
-        return buildInstallCard("Status", "Your installation is lower version.",
-            "Click to upgrade", bind.mainUpdateMe);
-      }
-    }
     if (updateUrl.isNotEmpty) {
       return buildInstallCard(
           "Status",
@@ -317,13 +310,56 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         await launchUrl(url);
       });
     }
-    if (Platform.isMacOS) {}
-    if (bind.mainIsInstalledLowerVersion()) {}
+    if (systemError.isNotEmpty) {
+      return buildInstallCard("", systemError, "", () {});
+    }
+    if (Platform.isWindows) {
+      if (!bind.mainIsInstalled()) {
+        return buildInstallCard(
+            "", "install_tip", "Install", bind.mainGotoInstall);
+      } else if (bind.mainIsInstalledLowerVersion()) {
+        return buildInstallCard("Status", "Your installation is lower version.",
+            "Click to upgrade", bind.mainUpdateMe);
+      }
+    } else if (Platform.isMacOS) {
+      if (!bind.mainIsCanScreenRecording(prompt: false)) {
+        return buildInstallCard("Permissions", "config_screen", "Configure",
+            () async {
+          bind.mainIsCanScreenRecording(prompt: true);
+          watchIsCanScreenRecording = true;
+        }, help: 'Help', link: translate("doc_mac_permission"));
+      } else if (!bind.mainIsProcessTrusted(prompt: false)) {
+        return buildInstallCard("Permissions", "config_acc", "Configure",
+            () async {
+          bind.mainIsProcessTrusted(prompt: true);
+          watchIsProcessTrust = true;
+        }, help: 'Help', link: translate("doc_mac_permission"));
+      } else if (!svcStopped.value &&
+          bind.mainIsInstalled() &&
+          !bind.mainIsInstalledDaemon(prompt: false)) {
+        return buildInstallCard("", "install_daemon_tip", "Install", () async {
+          bind.mainIsInstalledDaemon(prompt: true);
+        });
+      }
+    } else if (Platform.isLinux) {
+      if (bind.mainCurrentIsWayland()) {
+        return buildInstallCard(
+            "Warning", translate("wayland_experiment_tip"), "", () async {},
+            help: 'Help',
+            link: 'https://rustdesk.com/docs/en/manual/linux/#x11-required');
+      } else if (bind.mainIsLoginWayland()) {
+        return buildInstallCard("Warning",
+            "Login screen using Wayland is not supported", "", () async {},
+            help: 'Help',
+            link: 'https://rustdesk.com/docs/en/manual/linux/#login-screen');
+      }
+    }
     return Container();
   }
 
   Widget buildInstallCard(String title, String content, String btnText,
-      GestureTapCallback onPressed) {
+      GestureTapCallback onPressed,
+      {String? help, String? link}) {
     return Container(
       margin: EdgeInsets.only(top: 20),
       child: Container(
@@ -338,105 +374,110 @@ class _DesktopHomePageState extends State<DesktopHomePage>
           )),
           padding: EdgeInsets.all(20),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: (title.isNotEmpty
-                    ? <Widget>[
-                        Center(
-                            child: Text(
-                          translate(title),
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15),
-                        ).marginOnly(bottom: 6)),
-                      ]
-                    : <Widget>[]) +
-                <Widget>[
-                  Text(
-                    translate(content),
-                    style: TextStyle(
-                        height: 1.5,
-                        color: Colors.white,
-                        fontWeight: FontWeight.normal,
-                        fontSize: 13),
-                  ).marginOnly(bottom: 20),
-                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    FixedWidthButton(
-                      width: 150,
-                      padding: 8,
-                      isOutline: true,
-                      text: translate(btnText),
-                      textColor: Colors.white,
-                      borderColor: Colors.white,
-                      textSize: 20,
-                      radius: 10,
-                      onTap: onPressed,
-                    )
-                  ]),
-                ],
-          )),
+              mainAxisAlignment: MainAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: (title.isNotEmpty
+                      ? <Widget>[
+                          Center(
+                              child: Text(
+                            translate(title),
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15),
+                          ).marginOnly(bottom: 6)),
+                        ]
+                      : <Widget>[]) +
+                  <Widget>[
+                    Text(
+                      translate(content),
+                      style: TextStyle(
+                          height: 1.5,
+                          color: Colors.white,
+                          fontWeight: FontWeight.normal,
+                          fontSize: 13),
+                    ).marginOnly(bottom: 20)
+                  ] +
+                  (btnText.isNotEmpty
+                      ? <Widget>[
+                          Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                FixedWidthButton(
+                                  width: 150,
+                                  padding: 8,
+                                  isOutline: true,
+                                  text: translate(btnText),
+                                  textColor: Colors.white,
+                                  borderColor: Colors.white,
+                                  textSize: 20,
+                                  radius: 10,
+                                  onTap: onPressed,
+                                )
+                              ])
+                        ]
+                      : <Widget>[]) +
+                  (help != null
+                      ? <Widget>[
+                          Center(
+                              child: InkWell(
+                                  onTap: () async =>
+                                      await launchUrl(Uri.parse(link!)),
+                                  child: Text(
+                                    translate(help),
+                                    style: TextStyle(
+                                        decoration: TextDecoration.underline,
+                                        color: Colors.white,
+                                        fontSize: 12),
+                                  )).marginOnly(top: 6)),
+                        ]
+                      : <Widget>[]))),
     );
-  }
-
-  @override
-  void onTrayIconMouseDown() {
-    windowManager.show();
-  }
-
-  @override
-  void onTrayIconRightMouseDown() {
-    // linux does not support popup menu manually.
-    // linux will handle popup action ifself.
-    if (Platform.isMacOS || Platform.isWindows) {
-      trayManager.popUpContextMenu();
-    }
-  }
-
-  @override
-  void onTrayMenuItemClick(MenuItem menuItem) {
-    switch (menuItem.key) {
-      case kTrayItemQuitKey:
-        windowManager.close();
-        break;
-      case kTrayItemShowKey:
-        windowManager.show();
-        windowManager.focus();
-        break;
-      default:
-        break;
-    }
   }
 
   @override
   void initState() {
     super.initState();
     bind.mainStartGrabKeyboard();
-    Timer(const Duration(seconds: 5), () async {
-      updateUrl = await bind.mainGetSoftwareUpdateUrl();
-      if (updateUrl.isNotEmpty) setState(() {});
-    });
-    // disable this tray because we use tray function provided by rust now
-    // initTray();
-    trayManager.addListener(this);
-    rustDeskWinManager.registerActiveWindowListener(onActiveWindowChanged);
-    // main window may be hidden because of the initial uni link or arguments.
-    // note that we must wrap this active window registration in future because 
-    // we must ensure the execution is after `windowManager.hide/show()`.
-    Future.delayed(Duration.zero, () {
-      windowManager.isVisible().then((visibility) {
-        if (visibility) {
-          rustDeskWinManager.registerActiveWindow(kWindowMainId);
+    _updateTimer = periodic_immediate(const Duration(seconds: 1), () async {
+      await gFFI.serverModel.fetchID();
+      final url = await bind.mainGetSoftwareUpdateUrl();
+      if (updateUrl != url) {
+        updateUrl = url;
+        setState(() {});
+      }
+      final error = await bind.mainGetError();
+      if (systemError != error) {
+        systemError = error;
+        setState(() {});
+      }
+      final v = await bind.mainGetOption(key: "stop-service") == "Y";
+      if (v != svcStopped.value) {
+        svcStopped.value = v;
+        setState(() {});
+      }
+      if (watchIsCanScreenRecording) {
+        if (bind.mainIsCanScreenRecording(prompt: false)) {
+          watchIsCanScreenRecording = false;
+          setState(() {});
         }
-      });
+      }
+      if (watchIsProcessTrust) {
+        if (bind.mainIsProcessTrusted(prompt: false)) {
+          watchIsProcessTrust = false;
+          setState(() {});
+        }
+      }
     });
+    Get.put<RxBool>(svcStopped, tag: 'stop-service');
+    rustDeskWinManager.registerActiveWindowListener(onActiveWindowChanged);
 
     rustDeskWinManager.setMethodHandler((call, fromWindowId) async {
       debugPrint(
           "[Main] call ${call.method} with args ${call.arguments} from window $fromWindowId");
-      if (call.method == "main_window_on_top") {
+      if (call.method == kWindowMainWindowOnTop) {
         window_on_top(null);
-      } else if (call.method == "get_window_info") {
+      } else if (call.method == kWindowGetWindowInfo) {
         final screen = (await window_size.getWindowInfo()).screen;
         if (screen == null) {
           return "";
@@ -463,6 +504,13 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         rustDeskWinManager.registerActiveWindow(call.arguments["id"]);
       } else if (call.method == kWindowEventHide) {
         rustDeskWinManager.unregisterActiveWindow(call.arguments["id"]);
+      } else if (call.method == kWindowConnect) {
+        await connectMainDesktop(
+          call.arguments['id'],
+          isFileTransfer: call.arguments['isFileTransfer'],
+          isTcpTunneling: call.arguments['isTcpTunneling'],
+          isRDP: call.arguments['isRDP'],
+        );
       }
     });
     _uniLinksSubscription = listenUniLinks();
@@ -470,11 +518,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
 
   @override
   void dispose() {
-    // destoryTray();
-    // fix: disable unregister to prevent from receiving events from other windows
-    // rustDeskWinManager.unregisterActiveWindowListener(onActiveWindowChanged);
-    trayManager.removeListener(this);
     _uniLinksSubscription?.cancel();
+    Get.delete<RxBool>(tag: 'stop-service');
+    _updateTimer?.cancel();
     super.dispose();
   }
 }

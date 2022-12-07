@@ -324,7 +324,6 @@ class ServerModel with ChangeNotifier {
     parent.target?.ffiModel.updateEventListener("");
     await parent.target?.invokeMethod("init_service");
     await bind.mainStartService();
-    _fetchID();
     updateClientState();
     if (!Platform.isLinux) {
       // current linux is not supported
@@ -360,26 +359,12 @@ class ServerModel with ChangeNotifier {
     }
   }
 
-  _fetchID() async {
-    final old = _serverId.id;
-    var count = 0;
-    const maxCount = 10;
-    while (count < maxCount) {
-      await Future.delayed(Duration(seconds: 1));
-      final id = await bind.mainGetMyId();
-      if (id.isEmpty) {
-        continue;
-      } else {
-        _serverId.id = id;
-      }
-
-      debugPrint("fetch id again at $count:id:${_serverId.id}");
-      count++;
-      if (_serverId.id != old) {
-        break;
-      }
+  fetchID() async {
+    final id = await bind.mainGetMyId();
+    if (id != _serverId.id) {
+      _serverId.id = id;
+      notifyListeners();
     }
-    notifyListeners();
   }
 
   changeStatue(String name, bool value) {
@@ -596,10 +581,17 @@ class ServerModel with ChangeNotifier {
   }
 }
 
+enum ClientType {
+  remote,
+  file,
+  portForward,
+}
+
 class Client {
   int id = 0; // client connections inner count id
   bool authorized = false;
   bool isFileTransfer = false;
+  String portForward = "";
   String name = "";
   String peerId = ""; // peer user's id,show at app
   bool keyboard = false;
@@ -619,6 +611,7 @@ class Client {
     id = json['id'];
     authorized = json['authorized'];
     isFileTransfer = json['is_file_transfer'];
+    portForward = json['port_forward'];
     name = json['name'];
     peerId = json['peer_id'];
     keyboard = json['keyboard'];
@@ -635,6 +628,7 @@ class Client {
     data['id'] = id;
     data['is_start'] = authorized;
     data['is_file_transfer'] = isFileTransfer;
+    data['port_forward'] = portForward;
     data['name'] = name;
     data['peer_id'] = peerId;
     data['keyboard'] = keyboard;
@@ -645,6 +639,16 @@ class Client {
     data['recording'] = recording;
     data['disconnected'] = disconnected;
     return data;
+  }
+
+  ClientType type_() {
+    if (isFileTransfer) {
+      return ClientType.file;
+    } else if (portForward.isNotEmpty) {
+      return ClientType.portForward;
+    } else {
+      return ClientType.remote;
+    }
   }
 }
 
